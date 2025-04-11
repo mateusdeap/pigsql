@@ -1,11 +1,52 @@
 require "strscan"
 
 class Lexer
-  KEYWORDS = %w(
-    SELECT FROM WHERE INSERT INTO VALUES UPDATE SET DELETE
-    CREATE TABLE DROP ALTER ADD PRIMARY KEY INTEGER VARCHAR
-    AND OR NOT NULL
-  ).freeze
+  KEYWORDS = {
+    "SELECT" => :SELECT,
+    "FROM" => :FROM,
+    "WHERE" => :WHERE,
+    "INSERT" => :INSERT,
+    "INTO" => :INTO,
+    "VALUES" => :VALUES,
+    "UPDATE" => :UPDATE,
+    "SET" => :SET,
+    "DELETE" => :DELETE,
+    "CREATE" => :CREATE,
+    "TABLE" => :TABLE,
+    "DROP" => :DROP,
+    "ALTER" => :ALTER,
+    "ADD" => :ADD,
+    "PRIMARY" => :PRIMARY,
+    "KEY" => :KEY,
+    "INTEGER" => :INTEGER,
+    "VARCHAR" => :VARCHAR,
+    "AND" => :AND,
+    "OR" => :OR,
+    "NOT" => :NOT,
+    "NULL" => :NULL
+  }.freeze
+
+  OPERATORS = {
+    "=" => :EQUALS,
+    "<" => :LESS_THAN,
+    ">" => :GREATER_THAN,
+    "<=" => :LESS_EQUAL,
+    ">=" => :GREATER_EQUAL,
+    "<>" => :NOT_EQUAL,
+    "!=" => :NOT_EQUAL,
+    "+" => :PLUS,
+    "-" => :MINUS,
+    "*" => :MULTIPLY,
+    "/" => :DIVIDE
+  }.freeze
+
+  PUNCTUATION = {
+    "(" => :LPAREN,
+    ")" => :RPAREN,
+    "," => :COMMA,
+    ";" => :SEMICOLON,
+    "." => :DOT
+  }.freeze
 
   def initialize(input)
     @scanner = StringScanner.new(input)
@@ -18,32 +59,31 @@ class Lexer
 
     return nil if @scanner.eos?
 
-    position = { line: @line, column: @column }
+    position = {line: @line, column: @column}
 
     if token = scan_keyword ||
         scan_identifier ||
-        scan_number ||
+        scan_integer ||
+        scan_float ||
         scan_string ||
         scan_operator ||
         scan_punctuation
       return token + [position]
     end
 
-    # If we get here, we ecountered an unexpected character
     unexpected_char = @scanner.getch
     update_position(unexpected_char)
-    [:error, "Unexpected character: #{unexpected_char}", position]
+    [:ERROR, "Unexpected character: #{unexpected_char}", position]
   end
 
   def tokenize
     tokens = []
     while token = next_token
       tokens << token
-      break if token[0] == :error
+      break if token[0] == :ERROR
     end
+    tokens
   end
-
-  private
 
   def skip_whitespace
     while true
@@ -55,130 +95,100 @@ class Lexer
 
       if @scanner.scan(/--.*$/)
         update_position(@scanner.matched)
+        next
       end
+
       if @scanner.scan(/\/\*.*?\*\//m)
         update_position(@scanner.matched)
         next
       end
-      
-      # No more whitespace or comments
+
       break
     end
   end
 
-    # Match SQL keywords
   def scan_keyword
-    # Case-insensitive keyword matching
-    KEYWORDS.each do |keyword|
-      if @scanner.scan(/#{keyword}\b/i)
-        matched = @scanner.matched
+    if @scanner.scan(/[A-Za-z_][A-Za-z0-9_]*/)
+      matched = @scanner.matched
+      upper_matched = matched.upcase
+
+      if KEYWORDS.key?(upper_matched)
         update_position(matched)
-        return [:KEYWORD, matched.upcase]
+        return [KEYWORDS[upper_matched], upper_matched]
+      else
+        @scanner.unscan
       end
     end
     nil
   end
 
-  # Match identifiers (table names, column names, etc.)
   def scan_identifier
-    # Regular identifiers
     if @scanner.scan(/[a-zA-Z_][a-zA-Z0-9_]*/)
       matched = @scanner.matched
       update_position(matched)
       return [:IDENTIFIER, matched]
     end
-    
-    # Quoted identifiers
+
     if @scanner.scan(/"([^"]*)"/)
       matched = @scanner.matched
-      value = @scanner[1]  # Get the content inside quotes
+      value = @scanner[1]
       update_position(matched)
       return [:IDENTIFIER, value]
     end
-    
+
     nil
   end
 
-  # Match numeric literals
-  def scan_number
-    # Integer
+  def scan_integer
     if @scanner.scan(/\d+/)
       matched = @scanner.matched
       update_position(matched)
       return [:INTEGER, matched.to_i]
     end
-    
-    # Float with decimal point
+  end
+
+  def scan_float
     if @scanner.scan(/\d+\.\d+/)
       matched = @scanner.matched
       update_position(matched)
       return [:FLOAT, matched.to_f]
     end
-    
-    nil
   end
 
-  # Match string literals
   def scan_string
     if @scanner.scan(/'([^']*)'/)
       matched = @scanner.matched
-      value = @scanner[1]  # Get the content inside quotes
+      value = @scanner[1]
       update_position(matched)
       return [:STRING, value]
     end
     nil
   end
 
-  # Match operators
   def scan_operator
-    operators = {
-      '=' => :EQUALS,
-      '<' => :LESS_THAN,
-      '>' => :GREATER_THAN,
-      '<=' => :LESS_EQUAL,
-      '>=' => :GREATER_EQUAL,
-      '<>' => :NOT_EQUAL,
-      '!=' => :NOT_EQUAL,
-      '+' => :PLUS,
-      '-' => :MINUS,
-      '*' => :MULTIPLY,
-      '/' => :DIVIDE
-    }
-    
-    # Try to match the longest operators first
-    operators.keys.sort_by { |k| -k.length }.each do |op|
+    OPERATORS.keys.sort_by { |k| -k.length }.each do |op|
       if @scanner.scan(Regexp.new(Regexp.escape(op)))
         matched = @scanner.matched
         update_position(matched)
-        return [operators[op], matched]
+        return [OPERATORS[op], matched]
       end
     end
-    
+
     nil
   end
 
-  # Match punctuation
   def scan_punctuation
-    punctuation = {
-      '(' => :LPAREN,
-      ')' => :RPAREN,
-      ',' => :COMMA,
-      ';' => :SEMICOLON,
-      '.' => :DOT
-    }
-    
-    punctuation.each do |char, type|
+    PUNCTUATION.each do |char, type|
       if @scanner.scan(Regexp.new(Regexp.escape(char)))
         matched = @scanner.matched
         update_position(matched)
         return [type, matched]
       end
     end
-    
+
     nil
   end
 
-  # Update line and column position
   def update_position(text)
     lines = text.count("\n")
     if lines > 0
